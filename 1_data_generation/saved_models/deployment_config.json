@@ -1,0 +1,20 @@
+{
+  "threshold": 97.03125,
+  "threshold_explanation": "60th percentile of historical staffing_pressure",
+  "staffing_pressure_formula": "staff_to_patient_ratio * weighted_demand",
+  "equivalent_ratio_threshold": 1.9703500622246422,
+  "average_weighted_demand": 49.24569083447332,
+  "pressure_to_probability_k": 4,
+  "understaffed_probability_cutoff": 0.5,
+  "forecast_horizon_days": 7,
+  "model_type": "Prophet_with_regressor",
+  "regressor": "weighted_demand",
+  "facilities_trained": [
+    "HF_L4_004",
+    "HF_L4_005",
+    "HF_L5_002",
+    "HF_L5_003",
+    "HF_L6_001"
+  ],
+  "last_training_date": "2026-01-14 18:02:21"
+}
