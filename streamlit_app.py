@@ -10,8 +10,11 @@ import json
 import pickle
 import tempfile
 
-# Add src to path
-sys.path.append('workforce/src')
+# Add src to path (use absolute path from script location)
+import os
+script_dir = os.path.dirname(os.path.abspath(__file__))
+src_path = os.path.join(script_dir, 'workforce', 'src')
+sys.path.insert(0, src_path)
 
 # Import modules
 try:
@@ -19,7 +22,13 @@ try:
     from model_predict import predict_next_7_days, generate_executive_summary
     from readmission_predictor import ReadmissionPredictor
 except ImportError as e:
-    st.error(f"Import error: {e}. Please ensure all modules are in workforce/src/")
+    st.error(f"Import error: {e}")
+    st.error(f"Current directory: {os.getcwd()}")
+    st.error(f"Script directory: {script_dir}")
+    st.error(f"Looking for modules in: {src_path}")
+
+# Add src to path
+sys.path.append('workforce/src')
 
 # Set page config
 st.set_page_config(
