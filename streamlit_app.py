@@ -11,7 +11,7 @@ import pickle
 import tempfile
 
 # Add src to path
-sys.path.append('workforce/src')
+sys.path.append('src')
 
 # Import modules
 try:
