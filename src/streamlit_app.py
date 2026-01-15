@@ -10,8 +10,7 @@ import json
 import pickle
 import tempfile
 
-import sys
-sys.path.append('src')  # Just 'src', not 'workforce/src'
+  # Just 'src', not 'workforce/src'
 
 # Now you can import everything
 from feature_engineering import create_features
@@ -422,25 +421,28 @@ with tab2:
 # ============================================================================
 # TAB 3: FACILITY OVERLOAD DETECTION
 # ============================================================================
+# ============================================================================
+# TAB 3: FACILITY OVERLOAD DETECTION
+# ============================================================================
 with tab3:
     st.header("⚠️ Facility Overload Detection")
     st.markdown("Detect sustained overload as a proxy for burnout risk and declining care quality")
-    
+   
     # Sidebar for Tab 3
     with st.sidebar:
         st.subheader("📤 Facility Data Input")
-        
+       
         overload_file = st.file_uploader(
             "Upload facility data CSV",
             type=['csv'],
             key='overload_upload',
             help="CSV with: facility_id, day, beds_occupied, beds_available, total_staff, patient_load"
         )
-        
+       
         st.divider()
-        
+       
         st.subheader("⚙️ Detection Parameters")
-        
+       
         occupancy_threshold = st.slider(
             "High Occupancy Threshold",
             min_value=1.0,
@@ -450,7 +452,7 @@ with tab3:
             key='occupancy_threshold',
             help="Occupancy ratio above this indicates high occupancy"
         )
-        
+       
         staffing_threshold_overload = st.slider(
             "Low Staffing Threshold",
             min_value=0.01,
@@ -460,7 +462,7 @@ with tab3:
             key='staffing_threshold_overload',
             help="Staff-to-patient ratio below this indicates low staffing"
         )
-        
+       
         min_consecutive_days = st.slider(
             "Min Consecutive Days",
             min_value=3,
@@ -470,23 +472,22 @@ with tab3:
             key='min_consecutive',
             help="Minimum consecutive overload days for 'sustained' classification"
         )
-    
+   
     # Main content
     if overload_file is not None:
         try:
-            with st.spinner("Loading data..."):
-                df_overload = pd.read_csv(overload_file)
-                
-                required_cols = ['facility_id', 'day', 'beds_occupied', 'beds_available', 
-                               'total_staff', 'patient_load']
-                missing_cols = [col for col in required_cols if col not in df_overload.columns]
-                
-                if missing_cols:
-                    st.error(f"Missing required columns: {', '.join(missing_cols)}")
-                    st.stop()
-                
-                df_overload['day'] = pd.to_datetime(df_overload['day'])
-            
+            df_overload = pd.read_csv(overload_file)
+           
+            required_cols = ['facility_id', 'day', 'beds_occupied', 'beds_available',
+                             'total_staff', 'patient_load']
+            missing_cols = [col for col in required_cols if col not in df_overload.columns]
+           
+            if missing_cols:
+                st.error(f"Missing required columns: {', '.join(missing_cols)}")
+                st.stop()
+           
+            df_overload['day'] = pd.to_datetime(df_overload['day'])
+           
             # Display data preview
             st.subheader("📊 Data Preview")
             col1, col2, col3 = st.columns(3)
@@ -497,219 +498,97 @@ with tab3:
             with col3:
                 date_range = f"{df_overload['day'].min().date()} to {df_overload['day'].max().date()}"
                 st.metric("Date Range", date_range)
-            
+           
             with st.expander("View Data Sample", expanded=False):
                 st.dataframe(df_overload.head(), use_container_width=True)
-            
-            # Process data
+           
+            # === Analyze Button and Results (now correctly indented) ===
             if st.button("🚀 Analyze Overload Patterns", type="primary", key='overload_analyze'):
                 with st.spinner("Analyzing facility data..."):
-                    
-                    progress_bar = st.progress(0)
-                    
-                    # Calculate metrics
-                    progress_bar.progress(10)
-                    df_overload['occupancy_ratio'] = df_overload['beds_occupied'] / df_overload['beds_available']
-                    df_overload['staff_to_patient_ratio'] = df_overload['total_staff'] / df_overload['patient_load']
-                    
-                    df_overload = df_overload.sort_values(['facility_id', 'day'])
-                    df_overload['occupancy_7d_avg'] = df_overload.groupby('facility_id')['occupancy_ratio'] \
-                                                      .transform(lambda x: x.rolling(window=7, min_periods=1).mean())
-                    
-                    progress_bar.progress(30)
-                    
-                    # Calculate stress indicators
-                    patient_load_threshold = df_overload['patient_load'].quantile(0.75)
-                    
-                    df_overload['high_occupancy_flag'] = (df_overload['occupancy_ratio'] > occupancy_threshold).astype(int)
-                    df_overload['low_staffing_flag'] = (df_overload['staff_to_patient_ratio'] < staffing_threshold_overload).astype(int)
-                    df_overload['high_patient_load_flag'] = (df_overload['patient_load'] > patient_load_threshold).astype(int)
-                    df_overload['high_7d_avg_flag'] = (df_overload['occupancy_7d_avg'] > occupancy_threshold).astype(int)
-                    
-                    progress_bar.progress(50)
-                    
-                    # Composite score
-                    indicators = ['high_occupancy_flag', 'low_staffing_flag', 
-                                'high_patient_load_flag', 'high_7d_avg_flag']
-                    df_overload['stress_score'] = df_overload[indicators].sum(axis=1)
-                    df_overload['overload_day'] = (df_overload['stress_score'] >= 2).astype(int)
-                    
-                    progress_bar.progress(70)
-                    
-                    # Detect sustained periods
-                    def find_sustained_periods(facility_data):
-                        facility_data = facility_data.sort_values('day')
-                        periods = []
-                        current_streak = 0
-                        streak_start = None
-                        
-                        for idx, row in facility_data.iterrows():
-                            if row['overload_day'] == 1:
-                                if current_streak == 0:
-                                    streak_start = row['day']
-                                current_streak += 1
-                            else:
-                                if current_streak >= min_consecutive_days:
-                                    streak_end = facility_data.loc[idx-1, 'day'] if idx > 0 else streak_start
-                                    periods.append({
-                                        'start_date': streak_start,
-                                        'end_date': streak_end,
-                                        'duration_days': current_streak
-                                    })
-                                current_streak = 0
-                                streak_start = None
-                        
-                        if current_streak >= min_consecutive_days:
-                            streak_end = facility_data.iloc[-1]['day']
-                            periods.append({
-                                'start_date': streak_start,
-                                'end_date': streak_end,
-                                'duration_days': current_streak
-                            })
-                        
-                        return periods
-                    
-                    df_overload['in_sustained_period'] = 0
-                    all_periods = []
-                    
-                    for facility_id in df_overload['facility_id'].unique():
-                        facility_data = df_overload[df_overload['facility_id'] == facility_id].copy()
-                        sustained_periods = find_sustained_periods(facility_data)
-                        all_periods.extend(sustained_periods)
-                        
-                        for period in sustained_periods:
-                            mask = (df_overload['facility_id'] == facility_id) & \
-                                   (df_overload['day'] >= period['start_date']) & \
-                                   (df_overload['day'] <= period['end_date'])
-                            df_overload.loc[mask, 'in_sustained_period'] = 1
-                    
-                    progress_bar.progress(90)
-                    
-                    # Calculate facility summaries
-                    facility_summary = []
-                    for facility_id in df_overload['facility_id'].unique():
-                        facility_data = df_overload[df_overload['facility_id'] == facility_id]
-                        
-                        total_days = len(facility_data)
-                        overload_days = facility_data['overload_day'].sum()
-                        sustained_days = facility_data['in_sustained_period'].sum()
-                        
-                        overload_pct = (overload_days / total_days) * 100
-                        sustained_pct = (sustained_days / total_days) * 100
-                        avg_stress = facility_data['stress_score'].mean()
-                        
-                        if overload_pct > 60 and sustained_pct > 20:
-                            risk = "CRITICAL"
-                        elif overload_pct > 50 and sustained_pct > 10:
-                            risk = "HIGH"
-                        elif overload_pct > 40:
-                            risk = "MODERATE"
+                    try:
+                        results = analyze_overload(
+                            df_overload,
+                            occupancy_threshold=occupancy_threshold,
+                            staffing_threshold_overload=staffing_threshold_overload,
+                            min_consecutive_days=min_consecutive_days
+                        )
+
+                        df_overload = results['daily_df']
+                        facility_summary_df = results['facility_summary_df']
+                        all_periods = results['periods_df']
+
+                        st.success("Analysis Complete!")
+
+                        # Key Metrics
+                        total_overload = df_overload['overload_day'].sum()
+                        total_sustained = df_overload['in_sustained_period'].sum()
+
+                        m1, m2, m3, m4 = st.columns(4)
+                        with m1:
+                            st.metric("Total Overload Days", f"{total_overload:,}",
+                                      f"{(total_overload/len(df_overload)*100):.1f}%")
+                        with m2:
+                            st.metric("Sustained Overload Days", f"{total_sustained:,}",
+                                      f"{(total_sustained/len(df_overload)*100):.1f}%")
+                        with m3:
+                            critical_high = len(facility_summary_df[
+                                facility_summary_df['burnout_risk'].isin(['CRITICAL', 'HIGH'])])
+                            st.metric("Facilities at Risk", critical_high)
+                        with m4:
+                            avg_stress = df_overload['stress_score'].mean()
+                            st.metric("Average Stress Score", f"{avg_stress:.2f}")
+
+                        # Facility Ranking
+                        st.subheader("🏆 Facility Overload Ranking")
+                        st.dataframe(facility_summary_df, use_container_width=True)
+
+                        # Sustained Periods
+                        st.subheader("📅 Sustained Overload Periods")
+                        if not all_periods.empty:
+                            periods_display = all_periods.sort_values('duration_days', ascending=False)
+                            st.dataframe(periods_display.head(10), use_container_width=True)
+                            if len(periods_display) > 10:
+                                st.caption(f"Showing top 10 of {len(periods_display)} sustained periods")
                         else:
-                            risk = "LOW"
-                        
-                        facility_summary.append({
-                            'facility_id': facility_id,
-                            'total_days': total_days,
-                            'overload_days': overload_days,
-                            'overload_percentage': round(overload_pct, 1),
-                            'sustained_days': sustained_days,
-                            'sustained_percentage': round(sustained_pct, 1),
-                            'mean_stress_score': round(avg_stress, 2),
-                            'burnout_risk': risk
-                        })
-                    
-                    facility_summary_df = pd.DataFrame(facility_summary)
-                    facility_summary_df = facility_summary_df.sort_values('overload_percentage', ascending=False)
-                    
-                    progress_bar.progress(100)
-                    
-                    # DISPLAY RESULTS
-                    st.success("Analysis Complete!")
-                    
-                    # Key Metrics
-                    st.subheader("📈 Key Metrics")
-                    total_overload = df_overload['overload_day'].sum()
-                    total_sustained = df_overload['in_sustained_period'].sum()
-                    
-                    m1, m2, m3, m4 = st.columns(4)
-                    with m1:
-                        st.metric("Total Overload Days", f"{total_overload:,}", 
-                                 f"{total_overload/len(df_overload)*100:.1f}%")
-                    with m2:
-                        st.metric("Sustained Overload Days", f"{total_sustained:,}", 
-                                 f"{total_sustained/len(df_overload)*100:.1f}%")
-                    with m3:
-                        st.metric("Facilities at Risk", 
-                                 f"{len([r for r in facility_summary if r['burnout_risk'] in ['CRITICAL', 'HIGH']])}")
-                    with m4:
-                        avg_stress = df_overload['stress_score'].mean()
-                        st.metric("Average Stress Score", f"{avg_stress:.2f}")
-                    
-                    # Facility Ranking
-                    st.subheader("🏆 Facility Overload Ranking")
-                    st.dataframe(facility_summary_df, use_container_width=True)
-                    
-                    # Sustained Periods
-                    st.subheader("📅 Sustained Overload Periods")
-                    if all_periods:
-                        periods_df = pd.DataFrame(all_periods)
-                        periods_df['start_date'] = periods_df['start_date'].dt.date
-                        periods_df['end_date'] = periods_df['end_date'].dt.date
-                        periods_df = periods_df.sort_values('duration_days', ascending=False)
-                        
-                        st.dataframe(periods_df.head(10), use_container_width=True)
-                        if len(periods_df) > 10:
-                            st.caption(f"Showing top 10 of {len(periods_df)} sustained periods")
-                    else:
-                        st.info("No sustained overload periods detected")
-                    
-                    # Downloads
-                    st.subheader("📥 Download Results")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        csv_full = df_overload.to_csv(index=False)
-                        st.download_button(
-                            label="Download Full Results",
-                            data=csv_full,
-                            file_name=f"overload_full_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv",
-                            key='overload_download_full'
-                        )
-                    
-                    with col2:
-                        csv_summary = facility_summary_df.to_csv(index=False)
-                        st.download_button(
-                            label="Download Summary",
-                            data=csv_summary,
-                            file_name=f"overload_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv",
-                            key='overload_download_summary'
-                        )
-                    
-                    with col3:
-                        if all_periods:
-                            csv_periods = periods_df.to_csv(index=False)
-                            st.download_button(
-                                label="Download Periods",
-                                data=csv_periods,
-                                file_name=f"sustained_periods_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                mime="text/csv",
-                                key='overload_download_periods'
-                            )
-                    
+                            st.info("No sustained overload periods detected")
+
+                        # Downloads
+                        st.subheader("📥 Download Results")
+                        col1, col2, col3 = st.columns(3)
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+                        with col1:
+                            csv_full = df_overload.to_csv(index=False)
+                            st.download_button("Download Full Results", csv_full,
+                                               f"overload_full_{timestamp}.csv", "text/csv",
+                                               key='overload_download_full')
+
+                        with col2:
+                            csv_summary = facility_summary_df.to_csv(index=False)
+                            st.download_button("Download Summary", csv_summary,
+                                               f"overload_summary_{timestamp}.csv", "text/csv",
+                                               key='overload_download_summary')
+
+                        with col3:
+                            if not all_periods.empty:
+                                csv_periods = all_periods.to_csv(index=False)
+                                st.download_button("Download Periods", csv_periods,
+                                                   f"sustained_periods_{timestamp}.csv", "text/csv",
+                                                   key='overload_download_periods')
+
+                    except Exception as e:
+                        st.error(f"Analysis error: {str(e)}")
+                        st.exception(e)  # Optional: shows full traceback for debugging
+
         except Exception as e:
-            st.error(f"Error processing file: {str(e)}")
-            st.info("Please ensure your CSV file has the correct format and required columns.")
-    
+            st.error(f"Error loading file: {str(e)}")
     else:
         st.info("👈 Upload a CSV file using the sidebar to begin analysis")
-        
+       
         with st.expander("📋 Expected CSV Format", expanded=True):
             st.markdown("""
             Your CSV should contain these columns:
-            
+           
             | Column | Description | Example |
             |--------|-------------|---------|
             | `facility_id` | Facility identifier | `HF_L4_004` |
@@ -719,7 +598,7 @@ with tab3:
             | `total_staff` | Total staff count | `2255` |
             | `patient_load` | Total patient load | `49964.0` |
             """)
-            
+           
             example_data = pd.DataFrame({
                 'facility_id': ['HF_L4_004', 'HF_L4_004'],
                 'day': ['2023-01-01', '2023-01-02'],
