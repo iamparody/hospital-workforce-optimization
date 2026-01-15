@@ -15,13 +15,56 @@ FEATURES = [
 ]
 
 # ─── HELPER FUNCTIONS ────────────────────────────────────────────────────
-
-def preprocess_for_prediction(df):
-    """Minimal preprocessing needed for new prediction data"""
-    df['sex_num'] = df['sex'].map({'M': 0, 'F': 1}).fillna(0.5)
-    df['chronic_condition_num'] = df['chronic_condition'].astype(int)
-    # Assume other features are already numeric and prepared
-    return df[FEATURES]
+def preprocess_for_prediction(raw_df):
+    """Full preprocessing pipeline for raw procedure-level data"""
+    df = raw_df.copy()
+    
+    # Convert datetime
+    df['procedure_datetime'] = pd.to_datetime(df['procedure_datetime'], errors='coerce')
+    
+    # Create visit-level data
+    visits = df.groupby('visit_id').agg({
+        'patient_id': 'first',
+        'procedure_datetime': ['min', 'max'],
+        'procedure_code': 'count',
+        'age': 'first',
+        'sex': 'first',
+        'known_chronic_condition': 'first'
+    }).reset_index()
+    
+    visits.columns = [
+        'visit_id', 'patient_id',
+        'admission_datetime', 'discharge_datetime_raw',
+        'num_procedures', 'age', 'sex', 'chronic_condition'
+    ]
+    
+    # Simulate LOS (same as training)
+    np.random.seed(42)
+    los_values = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 21, 30]
+    los_probs = np.array([0.10, 0.18, 0.16, 0.14, 0.12, 0.10, 0.08, 0.06, 0.04, 0.03, 0.025, 0.015, 0.01, 0.005])
+    los_probs = los_probs / los_probs.sum()
+    
+    visits['los_days'] = np.random.choice(los_values, size=len(visits), p=los_probs)
+    
+    # Final dates
+    visits['discharge_datetime'] = visits['admission_datetime'] + pd.to_timedelta(visits['los_days'], unit='D')
+    visits['admission_date'] = visits['admission_datetime'].dt.date
+    visits['discharge_date'] = visits['discharge_datetime'].dt.date
+    
+    # Sort
+    visits = visits.sort_values(['patient_id', 'admission_datetime']).reset_index(drop=True)
+    
+    # Add required engineered features (minimal version)
+    visits['num_prior_visits'] = visits.groupby('patient_id').cumcount()
+    visits['prev_readmitted'] = 0  # cannot compute without label, set to 0
+    visits['prev_los'] = 0         # cannot compute previous LOS without history, set to 0
+    
+    # Numeric encoding
+    visits['sex_num'] = visits['sex'].map({'M': 0, 'F': 1}).fillna(0.5)
+    visits['chronic_condition_num'] = visits['chronic_condition'].astype(int)
+    
+    # Select only model features
+    return visits[FEATURES]
 
 def load_model():
     """Load the pre-trained Balanced Random Forest model"""
