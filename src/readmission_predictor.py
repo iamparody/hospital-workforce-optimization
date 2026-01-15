@@ -215,7 +215,9 @@ class ReadmissionPredictor:
         
         print(f"Model saved to {self.model_path}")
     
-        def load_model(self):
+        
+    
+    def load_model(self):
         """Load saved model using absolute path based on this script's location."""
         # Get the directory where readmission_predictor.py is located
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -239,7 +241,6 @@ class ReadmissionPredictor:
                 raise RuntimeError(f"Failed to load model due to pickle error: {str(e)}")
         else:
             raise FileNotFoundError(f"Model file not found at {full_model_path}")
-    
     def get_feature_importance(self):
         """Get feature importance from trained model."""
         if self.model is None:
@@ -269,4 +270,5 @@ if __name__ == "__main__":
     # predictions.to_csv('predictions.csv', index=False)
     
     print("Readmission Predictor initialized. Use predict() method on your data.")
+
 
