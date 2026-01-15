@@ -215,18 +215,30 @@ class ReadmissionPredictor:
         
         print(f"Model saved to {self.model_path}")
     
-    def load_model(self):
-        """Load saved model."""
-        if os.path.exists(self.model_path):
-            with open(self.model_path, 'rb') as f:
-                model_data = pickle.load(f)
-            
-            self.model = model_data['model']
-            self.feature_columns = model_data['feature_columns']
-            self.optimal_threshold = model_data['optimal_threshold']
-            print(f"Model loaded from {self.model_path}")
+        def load_model(self):
+        """Load saved model using absolute path based on this script's location."""
+        # Get the directory where readmission_predictor.py is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        full_model_path = os.path.join(script_dir, 'readmission_model.pkl')
+        
+        # Debug prints (visible in Streamlit Cloud logs)
+        print(f"[DEBUG] Script directory: {script_dir}")
+        print(f"[DEBUG] Looking for model at: {full_model_path}")
+        print(f"[DEBUG] File exists? {os.path.exists(full_model_path)}")
+        
+        if os.path.exists(full_model_path):
+            try:
+                with open(full_model_path, 'rb') as f:
+                    model_data = pickle.load(f)
+                self.model = model_data['model']
+                self.feature_columns = model_data['feature_columns']
+                self.optimal_threshold = model_data['optimal_threshold']
+                print(f"✓ Model successfully loaded from {full_model_path}")
+            except Exception as e:
+                print(f"✗ Error loading/pickling model: {str(e)}")
+                raise RuntimeError(f"Failed to load model due to pickle error: {str(e)}")
         else:
-            raise FileNotFoundError(f"Model file {self.model_path} not found")
+            raise FileNotFoundError(f"Model file not found at {full_model_path}")
     
     def get_feature_importance(self):
         """Get feature importance from trained model."""
@@ -257,3 +269,4 @@ if __name__ == "__main__":
     # predictions.to_csv('predictions.csv', index=False)
     
     print("Readmission Predictor initialized. Use predict() method on your data.")
+
