@@ -10,19 +10,14 @@ import json
 import pickle
 import tempfile
 
-# Add src to path
-sys.path.append('src')
+import sys
+sys.path.append('src')  # Just 'src', not 'workforce/src'
 
-# Import modules
-try:
-    from feature_engineering import create_features
-    from model_predict import predict_next_7_days, generate_executive_summary
-    from readmission_predictor import ReadmissionPredictor
-except ImportError as e:
-    st.error(f"Import error: {e}. Please ensure all modules are in workforce/src/")
-
-# Add src to path
-sys.path.append('workforce/src')
+# Now you can import everything
+from feature_engineering import create_features
+from model_predict import predict_next_7_days
+from readmission_predictor import ReadmissionPredictor
+from process_dep_overload import analyze_overload
 
 # Set page config
 st.set_page_config(
