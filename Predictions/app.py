@@ -1,324 +1,110 @@
-# ────────────────────────────────────────────────────────────────
-# app.py - Streamlit Application
-# ────────────────────────────────────────────────────────────────
+# app.py - Streamlit app for 30-day readmission prediction
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
-import plotly.express as px
+from sklearn.ensemble import RandomForestClassifier  # just for type hint
+from imblearn.ensemble import BalancedRandomForestClassifier
 
-st.set_page_config(page_title="Healthcare Staffing Analytics", layout="wide")
+# ─── CONFIGURATION ───────────────────────────────────────────────────────
+MODEL_PATH = "balanced_random_forest_readmission.pkl"
+FEATURES = [
+    'age', 'sex_num', 'chronic_condition_num', 'num_procedures',
+    'los_days', 'num_prior_visits', 'prev_los', 'prev_readmitted'
+]
 
-# ═══════════════════════════════════════════════════════════════
-# LOAD MODELS
-# ═══════════════════════════════════════════════════════════════
+# ─── HELPER FUNCTIONS ────────────────────────────────────────────────────
 
-@st.cache_resource
-def load_models():
+def preprocess_for_prediction(df):
+    """Minimal preprocessing needed for new prediction data"""
+    df['sex_num'] = df['sex'].map({'M': 0, 'F': 1}).fillna(0.5)
+    df['chronic_condition_num'] = df['chronic_condition'].astype(int)
+    # Assume other features are already numeric and prepared
+    return df[FEATURES]
+
+def load_model():
+    """Load the pre-trained Balanced Random Forest model"""
     try:
-        with open('healthcare_models.pkl', 'rb') as f:
-            return pickle.load(f)
+        with open(MODEL_PATH, 'rb') as f:
+            model = pickle.load(f)
+        return model
     except FileNotFoundError:
-        st.error("⚠️ Model file not found. Run training_script.py first.")
+        st.error(f"Model file not found: {MODEL_PATH}")
+        st.stop()
+    except Exception as e:
+        st.error(f"Error loading model: {e}")
         st.stop()
 
-model_package = load_models()
-models = model_package['models']
-baseline_stats = model_package['baseline_stats']
-config = model_package['config']
+# ─── STREAMLIT APP ───────────────────────────────────────────────────────
 
-# ═══════════════════════════════════════════════════════════════
-# DATA PREPROCESSING
-# ═══════════════════════════════════════════════════════════════
+st.set_page_config(page_title="30-Day Readmission Risk Predictor", layout="wide")
 
-def preprocess_raw_data(df):
-    """Convert raw CSV to aggregated format"""
-    # Handle date column
-    if 'context_datetime' in df.columns:
-        df['context_datetime'] = pd.to_datetime(df['context_datetime'])
-        df['date'] = pd.to_datetime(df['context_datetime'].dt.date)
-    elif 'date' not in df.columns:
-        st.error("❌ CSV must contain 'date' or 'context_datetime' column")
-        st.stop()
-    else:
-        df['date'] = pd.to_datetime(df['date'])
-    
-    # Check if already aggregated
-    required_cols = ['occupancy_rate', 'staff_per_occupied_bed', 'total_staff']
-    if all(col in df.columns for col in required_cols):
-        return df  # Already processed
-    
-    # Aggregate raw data
-    agg_df = df.groupby(['facility_id', 'department_id', 'date']).agg({
-        'staff_on_duty': 'sum',
-        'nurses_on_duty': 'sum',
-        'doctors_on_duty': 'sum',
-        'beds_occupied': 'sum',
-        'beds_available': 'max'
-    }).reset_index()
-    
-    # Feature engineering
-    agg_df['total_beds'] = agg_df['beds_occupied'] + agg_df['beds_available']
-    agg_df['occupancy_rate'] = np.where(
-        agg_df['total_beds'] > 0,
-        agg_df['beds_occupied'] / agg_df['total_beds'],
-        0.0
-    )
-    agg_df['total_staff'] = (
-        agg_df['staff_on_duty'] +
-        agg_df['nurses_on_duty'] +
-        agg_df['doctors_on_duty']
-    )
-    agg_df['staff_per_occupied_bed'] = np.where(
-        agg_df['beds_occupied'] > 0,
-        agg_df['total_staff'] / agg_df['beds_occupied'],
-        0.0
-    )
-    
-    return agg_df
+st.title("30-Day Hospital Readmission Risk Predictor")
+st.markdown("""
+Upload a CSV file containing patient visit data.  
+The model will predict the probability of readmission within 30 days.
+""")
 
-# ═══════════════════════════════════════════════════════════════
-# PREDICTION FUNCTIONS
-# ═══════════════════════════════════════════════════════════════
+# File uploader
+uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
-def predict_understaffing(agg_df):
-    """Q1: Predict understaffing risk for next 7 days"""
-    dept_daily = agg_df.groupby(['department_id', 'date']).agg({
-        'occupancy_rate': 'mean',
-        'staff_per_occupied_bed': 'mean',
-        'total_staff': 'mean'
-    }).reset_index()
-    
-    risk_scores = []
-    for dept in baseline_stats.keys():
-        staff_model = models[f"{dept}_staff"]
-        occ_model = models[f"{dept}_occupancy"]
-        
-        future = staff_model.make_future_dataframe(periods=config['FORECAST_DAYS'])
-        
-        staff_fc = staff_model.predict(future).tail(config['FORECAST_DAYS'])['yhat'].values
-        occ_fc = occ_model.predict(future).tail(config['FORECAST_DAYS'])['yhat'].values
-        
-        baseline_staff = baseline_stats[dept]['baseline_staff']
-        baseline_occ = baseline_stats[dept]['baseline_occ']
-        
-        occ_change = ((occ_fc.mean() - baseline_occ) / baseline_occ) * 100
-        staff_change = ((staff_fc.mean() - baseline_staff) / baseline_staff) * 100
-        risk_score = (occ_change * 0.6) - (staff_change * 0.4)
-        
-        understaff_days = ((occ_fc > baseline_occ) & (staff_fc < baseline_staff)).sum()
-        
-        risk_scores.append({
-            'department_id': dept,
-            'baseline_occupancy': round(baseline_occ, 3),
-            'forecast_occupancy': round(occ_fc.mean(), 3),
-            'occ_change_%': round(occ_change, 2),
-            'baseline_staff_ratio': round(baseline_staff, 3),
-            'forecast_staff_ratio': round(staff_fc.mean(), 3),
-            'staff_change_%': round(staff_change, 2),
-            'days_worse_than_baseline': int(understaff_days),
-            'risk_score': round(risk_score, 2)
-        })
-    
-    return pd.DataFrame(risk_scores).sort_values('risk_score', ascending=False)
+if uploaded_file is not None:
+    with st.spinner("Processing your data..."):
+        try:
+            # Read uploaded data
+            df = pd.read_csv(uploaded_file)
 
-def analyze_sustained_overload(agg_df):
-    """Q2: Detect sustained overload patterns"""
-    agg_df = agg_df.copy()
-    agg_df['is_overloaded'] = (
-        (agg_df['occupancy_rate'] > config['OVERLOAD_OCCUPANCY']) &
-        (agg_df['staff_per_occupied_bed'] < config['OVERLOAD_STAFF_RATIO'])
-    ).astype(int)
-    
-    agg_df_sorted = agg_df.sort_values(['department_id', 'facility_id', 'date'])
-    agg_df_sorted['overload_streak'] = (
-        agg_df_sorted.groupby(['department_id', 'facility_id'])['is_overloaded']
-        .transform(lambda x: x * (x.groupby((x != x.shift()).cumsum()).cumsum()))
-    )
-    
-    overload_df = agg_df_sorted.groupby('department_id').agg({
-        'overload_streak': 'max',
-        'is_overloaded': 'sum',
-        'date': 'count'
-    }).reset_index()
-    
-    overload_df.columns = ['department_id', 'max_consecutive_days', 'total_overload_days', 'total_days']
-    overload_df['overload_%'] = (overload_df['total_overload_days'] / overload_df['total_days'] * 100).round(2)
-    
-    return overload_df.sort_values('max_consecutive_days', ascending=False)
+            # Basic validation
+            missing_cols = [col for col in ['age', 'sex', 'chronic_condition', 'num_procedures', 
+                                           'los_days', 'num_prior_visits', 'prev_los', 'prev_readmitted']
+                            if col not in df.columns]
+            if missing_cols:
+                st.error(f"Missing required columns: {', '.join(missing_cols)}")
+            else:
+                # Preprocess
+                X_pred = preprocess_for_prediction(df)
 
-# ═══════════════════════════════════════════════════════════════
-# UI
-# ═══════════════════════════════════════════════════════════════
+                # Load model
+                model = load_model()
 
-st.title("🏥 Healthcare Staffing Analytics Dashboard")
-st.markdown("Upload healthcare data to predict understaffing risk and detect sustained overload")
+                # Predict
+                probabilities = model.predict_proba(X_pred)[:, 1]  # probability of class 1 (readmission)
 
-# Sidebar info
-with st.sidebar:
-    st.header("ℹ️ About")
-    st.markdown(f"""
-    **Model Configuration:**
-    - Forecast period: {config['FORECAST_DAYS']} days
-    - High occupancy: > {config['OCCUPANCY_HIGH_THRESHOLD']}
-    - Low staff ratio: < {config['MIN_STAFF_PER_OCCUPIED_BED']}
-    - Overload threshold: {config['MIN_CONSECUTIVE_DAYS']} consecutive days
-    
-    **Departments tracked:**
-    {', '.join(baseline_stats.keys())}
-    """)
+                # Add results to dataframe
+                df['readmission_probability'] = probabilities
+                df['readmission_risk'] = (probabilities >= 0.5).astype(int)  # threshold 50%
 
-# File upload
-uploaded_file = st.file_uploader(
-    "Upload CSV file",
-    type=['csv'],
-    help="Upload either raw staffing_context.csv or preprocessed agg_df.csv"
-)
+                st.success("Prediction complete!")
 
-if uploaded_file:
-    # Load and preprocess
-    with st.spinner("Loading data..."):
-        raw_df = pd.read_csv(uploaded_file)
-        agg_df = preprocess_raw_data(raw_df)
-    
-    st.success(f"✓ Loaded {len(agg_df):,} records from {agg_df['date'].min().date()} to {agg_df['date'].max().date()}")
-    
-    # Generate predictions
-    with st.spinner("Generating predictions..."):
-        risk_df = predict_understaffing(agg_df)
-        overload_df = analyze_sustained_overload(agg_df)
-    
-    # Display results
-    tab1, tab2, tab3 = st.tabs([
-        "📊 Q1: Understaffing Risk",
-        "⚠️ Q2: Sustained Overload",
-        "📋 Summary"
-    ])
-    
-    # ─────────────────────────────────────────────────────────
-    # TAB 1: Understaffing Risk
-    # ─────────────────────────────────────────────────────────
-    with tab1:
-        st.subheader("Departments at Risk (Next 7 Days)")
-        
-        high_risk = risk_df[risk_df['risk_score'] > 0]
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("High Risk Departments", len(high_risk), 
-                   delta=f"{len(high_risk)}/{len(risk_df)}")
-        col2.metric("Highest Risk Score", f"{risk_df['risk_score'].max():.2f}")
-        col3.metric("Average Risk", f"{risk_df['risk_score'].mean():.2f}")
-        
-        # Risk chart
-        fig = px.bar(
-            risk_df,
-            x='department_id',
-            y='risk_score',
-            color='risk_score',
-            color_continuous_scale='RdYlGn_r',
-            title="Risk Score by Department",
-            labels={'risk_score': 'Risk Score', 'department_id': 'Department'}
-        )
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Neutral")
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Detailed table
-        st.dataframe(
-            risk_df,
-            use_container_width=True,
-            column_config={
-                "risk_score": st.column_config.NumberColumn(
-                    "Risk Score",
-                    help="Positive = deteriorating conditions",
-                    format="%.2f"
+                # Show results
+                st.subheader("Prediction Results")
+                st.dataframe(df[['age', 'sex', 'chronic_condition', 'los_days', 
+                                 'readmission_probability', 'readmission_risk']])
+
+                # Download results
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download predictions as CSV",
+                    data=csv,
+                    file_name="readmission_predictions.csv",
+                    mime="text/csv"
                 )
-            }
-        )
-    
-    # ─────────────────────────────────────────────────────────
-    # TAB 2: Sustained Overload
-    # ─────────────────────────────────────────────────────────
-    with tab2:
-        st.subheader("Historical Sustained Overload Analysis")
-        
-        sustained = overload_df[overload_df['max_consecutive_days'] >= config['MIN_CONSECUTIVE_DAYS']]
-        
-        col1, col2 = st.columns(2)
-        col1.metric("Sustained Overload Departments", len(sustained))
-        col2.metric("Longest Streak", f"{overload_df['max_consecutive_days'].max()} days")
-        
-        # Overload chart
-        fig = px.bar(
-            overload_df,
-            x='department_id',
-            y='max_consecutive_days',
-            color='overload_%',
-            color_continuous_scale='Reds',
-            title="Maximum Consecutive Overload Days",
-            labels={'max_consecutive_days': 'Consecutive Days', 'department_id': 'Department'}
-        )
-        fig.add_hline(
-            y=config['MIN_CONSECUTIVE_DAYS'],
-            line_dash="dash",
-            line_color="orange",
-            annotation_text=f"Sustained threshold ({config['MIN_CONSECUTIVE_DAYS']} days)"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.dataframe(overload_df, use_container_width=True)
-    
-    # ─────────────────────────────────────────────────────────
-    # TAB 3: Executive Summary
-    # ─────────────────────────────────────────────────────────
-    with tab3:
-        st.subheader("Executive Summary")
-        
-        st.markdown("### 📊 Q1: Understaffing Risk (Next 7 Days)")
-        if len(high_risk) > 0:
-            for _, row in high_risk.iterrows():
-                with st.expander(f"🔴 **{row['department_id']}** - Risk Score: {row['risk_score']:.2f}"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric(
-                            "Occupancy Change",
-                            f"{row['forecast_occupancy']:.3f}",
-                            delta=f"{row['occ_change_%']:+.1f}%"
-                        )
-                    with col2:
-                        st.metric(
-                            "Staff Ratio Change",
-                            f"{row['forecast_staff_ratio']:.3f}",
-                            delta=f"{row['staff_change_%']:+.1f}%",
-                            delta_color="inverse"
-                        )
-                    st.caption(f"Days worse than baseline: {row['days_worse_than_baseline']}")
-        else:
-            st.success("✅ No departments at risk - all showing stable/improving conditions")
-        
-        st.markdown("### ⚠️ Q2: Sustained Overload")
-        if len(sustained) > 0:
-            for _, row in sustained.iterrows():
-                with st.expander(f"🔴 **{row['department_id']}**"):
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Longest Streak", f"{row['max_consecutive_days']} days")
-                    col2.metric("Total Overload Days", row['total_overload_days'])
-                    col3.metric("Overload %", f"{row['overload_%']}%")
-        else:
-            st.success("✅ No sustained overload detected")
+
+                # Risk distribution
+                st.subheader("Risk Distribution")
+                fig, ax = plt.subplots()
+                df['readmission_probability'].hist(bins=20, ax=ax)
+                ax.set_title("Distribution of Predicted Readmission Probabilities")
+                ax.set_xlabel("Probability")
+                ax.set_ylabel("Count")
+                st.pyplot(fig)
+
+        except Exception as e:
+            st.error(f"Error processing file: {str(e)}")
 
 else:
-    st.info("👆 Upload a CSV file to begin analysis")
-    
-    # Sample data format
-    with st.expander("📄 Expected CSV Format"):
-        st.markdown("""
-        **Option 1: Raw data** (will be auto-processed)
-        - `context_datetime`, `facility_id`, `department_id`
-        - `staff_on_duty`, `nurses_on_duty`, `doctors_on_duty`
-        - `beds_occupied`, `beds_available`
-        
-        **Option 2: Pre-aggregated data**
-        - `date`, `facility_id`, `department_id`
-        - `occupancy_rate`, `staff_per_occupied_bed`, `total_staff`
-        """)
+    st.info("Please upload a CSV file containing the required columns.")
+
+st.markdown("---")
+st.caption("Model: Balanced Random Forest | Trained on synthetic data | For demonstration only")
