@@ -1,21 +1,17 @@
-# app.py - Streamlit app for 30-day readmission prediction
+# app.py - Enhanced Streamlit app for 30-day readmission prediction
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
-import matplotlib.pyplot as plt
-from sklearn.ensemble import RandomForestClassifier  # just for type hint
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from sklearn.ensemble import RandomForestClassifier
 from imblearn.ensemble import BalancedRandomForestClassifier
 
-import os
-#st.write("Files in directory:", os.listdir('.'))
-#st.write("PKL exists:", os.path.exists('balanced_random_forest_readmission.pkl'))
-
-
-
 # ─── CONFIGURATION ───────────────────────────────────────────────────────
-MODEL_PATH = "overload/balanced_random_forest_readmission.pkl"
+MODEL_PATH = "balanced_random_forest_readmission.pkl"
 FEATURES = [
     'age', 'sex_num', 'chronic_condition_num', 'num_procedures',
     'los_days', 'num_prior_visits', 'prev_los', 'prev_readmitted'
@@ -71,13 +67,8 @@ def preprocess_for_prediction(raw_df):
     visits = visits.sort_values(['patient_id', 'admission_datetime']).reset_index(drop=True)
     
     # Add required engineered features
-    # Calculate prior visits per patient
     visits['num_prior_visits'] = visits.groupby('patient_id').cumcount()
-    
-    # Calculate previous LOS (for patients with prior visits)
     visits['prev_los'] = visits.groupby('patient_id')['los_days'].shift(1).fillna(0)
-    
-    # Previous readmission flag (initialize as 0, will be calculated if we had labels)
     visits['prev_readmitted'] = 0
     
     # Numeric encoding
@@ -94,48 +85,179 @@ def load_model():
             model = pickle.load(f)
         return model
     except FileNotFoundError:
-        st.error(f"Model file not found: {MODEL_PATH}")
+        st.error(f"🚨 Model file not found: {MODEL_PATH}")
         st.stop()
     except Exception as e:
-        st.error(f"Error loading model: {e}")
+        st.error(f"🚨 Error loading model: {e}")
         st.stop()
 
 # ─── STREAMLIT APP ───────────────────────────────────────────────────────
 
-st.set_page_config(page_title="30-Day Readmission Risk Predictor", layout="wide")
+st.set_page_config(
+    page_title="30-Day Readmission Predictor",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("30-Day Hospital Readmission Risk Predictor")
+# Custom CSS for modern styling
 st.markdown("""
-Upload a CSV file containing patient visit data.  
-The model will predict the probability of readmission within 30 days.
-""")
+<style>
+    /* Main container */
+    .main {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    }
+    
+    /* Headers */
+    h1 {
+        color: #1e3a8a;
+        font-weight: 700;
+        padding-bottom: 20px;
+        border-bottom: 3px solid #3b82f6;
+    }
+    
+    h2, h3 {
+        color: #1e40af;
+    }
+    
+    /* Metric cards */
+    [data-testid="stMetricValue"] {
+        font-size: 28px;
+        font-weight: 700;
+        color: #1e40af;
+    }
+    
+    [data-testid="stMetricLabel"] {
+        font-size: 14px;
+        font-weight: 600;
+        color: #64748b;
+    }
+    
+    /* File uploader */
+    [data-testid="stFileUploader"] {
+        background: white;
+        border-radius: 12px;
+        padding: 25px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    /* Buttons */
+    .stDownloadButton button {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        color: white;
+        font-weight: 600;
+        border: none;
+        border-radius: 8px;
+        padding: 12px 24px;
+        transition: all 0.3s ease;
+    }
+    
+    .stDownloadButton button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(59, 130, 246, 0.4);
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1e3a8a 0%, #3b82f6 100%);
+    }
+    
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+        color: white;
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        background: white;
+        border-radius: 8px;
+        font-weight: 600;
+    }
+    
+    /* Success/Info boxes */
+    .stAlert {
+        border-radius: 8px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── SIDEBAR ─────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("# 🏥 Readmission Predictor")
+    st.markdown("---")
+    
+    st.markdown("### 📊 Model Information")
+    st.info("""
+    **Algorithm:** Balanced Random Forest  
+    **Purpose:** 30-Day Readmission Risk  
+    **Status:** ✅ Active
+    """)
+    
+    st.markdown("---")
+    st.markdown("### ⚙️ Settings")
+    
+    risk_threshold = st.slider(
+        "High Risk Threshold (%)",
+        min_value=30,
+        max_value=70,
+        value=50,
+        step=5,
+        help="Adjust the probability threshold for high-risk classification"
+    )
+    
+    show_details = st.toggle("Show detailed statistics", value=True)
+    
+    st.markdown("---")
+    st.markdown("### 📖 Quick Guide")
+    st.markdown("""
+    1. **Upload** your patient data CSV
+    2. **Review** predictions and risk levels
+    3. **Download** results for your records
+    4. **Analyze** trends in the charts
+    """)
+    
+    st.markdown("---")
+    st.markdown("### ℹ️ About")
+    st.markdown("""
+    This tool predicts hospital readmission risk using machine learning.
+    
+    **Version:** 2.0  
+    **Last Updated:** Jan 2025
+    """)
+
+# ─── MAIN CONTENT ────────────────────────────────────────────────────────
+st.title("🏥 30-Day Hospital Readmission Risk Predictor")
+st.markdown("""
+<div style='background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px;'>
+    <p style='font-size: 16px; color: #475569; margin: 0;'>
+        📁 Upload patient visit data to predict readmission risk within 30 days using our advanced ML model.
+    </p>
+</div>
+""", unsafe_allow_html=True)
 
 # File uploader
-uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+uploaded_file = st.file_uploader(
+    "📤 Upload Your CSV File",
+    type=["csv"],
+    help="Upload patient visit data in CSV format"
+)
 
 if uploaded_file is not None:
-    with st.spinner("Processing your data..."):
+    with st.spinner("🔄 Processing your data..."):
         try:
             # Read uploaded data
             df = pd.read_csv(uploaded_file)
             
             # Check if this is raw data or already processed
-            # Raw data has: visit_id, patient_id, procedure_datetime, procedure_code, etc.
-            # Processed data has: age, sex_num, chronic_condition_num, etc.
-            
             if 'procedure_datetime' in df.columns:
-                # This is raw procedure-level data - need to process it
-                st.info("Detected raw procedure data. Processing to create features...")
+                st.info("🔍 Detected raw procedure data. Processing to create features...")
                 X_pred = preprocess_for_prediction(df)
                 
             elif all(feat in df.columns for feat in FEATURES):
-                # This is already processed with engineered features
-                st.info("Detected already processed data with engineered features.")
+                st.info("✅ Detected already processed data with engineered features.")
                 X_pred = df[FEATURES]
                 
             else:
-                # Missing columns - show what's available vs what's needed
-                st.error("Data format not recognized.")
+                st.error("❌ Data format not recognized.")
                 st.write("**Available columns in your file:**")
                 st.write(list(df.columns))
                 st.write("**Required for raw data:** `visit_id`, `patient_id`, `procedure_datetime`, `procedure_code`, `age`, `sex`, `known_chronic_condition`")
@@ -146,12 +268,12 @@ if uploaded_file is not None:
             model = load_model()
             
             # Predict
-            probabilities = model.predict_proba(X_pred)[:, 1]  # probability of class 1 (readmission)
+            probabilities = model.predict_proba(X_pred)[:, 1]
             
             # Create results DataFrame
             results_df = pd.DataFrame({
                 'readmission_probability': probabilities,
-                'readmission_risk': (probabilities >= 0.3).astype(int)  # Lower threshold for imbalance
+                'readmission_risk': (probabilities >= (risk_threshold/100)).astype(int)
             })
             
             # Add patient ID and visit ID if available
@@ -160,119 +282,268 @@ if uploaded_file is not None:
             if 'visit_id' in df.columns and len(df) == len(results_df):
                 results_df['visit_id'] = df['visit_id'].values
             
-            st.success(f"Prediction complete! Processed {len(results_df)} visits.")
+            st.success(f"✅ Prediction complete! Processed **{len(results_df)}** visits.")
             
-            # Show results
-            st.subheader("Prediction Results")
-            st.dataframe(results_df)
+            # ─── METRICS DASHBOARD ───────────────────────────────────────
+            st.markdown("### 📈 Risk Summary Dashboard")
             
-            # Display statistics
-            st.subheader("Risk Summary")
             col1, col2, col3, col4 = st.columns(4)
             
+            high_risk = (probabilities >= (risk_threshold/100)).sum()
+            medium_risk = ((probabilities >= 0.3) & (probabilities < (risk_threshold/100))).sum()
+            low_risk = (probabilities < 0.3).sum()
+            avg_risk = probabilities.mean()
+            
             with col1:
-                high_risk = (probabilities >= 0.5).sum()
-                st.metric("High Risk (≥50%)", f"{high_risk}")
+                st.metric(
+                    "🔴 High Risk",
+                    f"{high_risk}",
+                    f"{high_risk/len(probabilities)*100:.1f}%",
+                    help=f"Patients with ≥{risk_threshold}% readmission probability"
+                )
             
             with col2:
-                medium_risk = ((probabilities >= 0.3) & (probabilities < 0.5)).sum()
-                st.metric("Medium Risk (30-50%)", f"{medium_risk}")
+                st.metric(
+                    "🟡 Medium Risk",
+                    f"{medium_risk}",
+                    f"{medium_risk/len(probabilities)*100:.1f}%",
+                    help=f"Patients with 30-{risk_threshold}% probability"
+                )
             
             with col3:
-                avg_risk = probabilities.mean()
-                st.metric("Average Risk", f"{avg_risk:.1%}")
+                st.metric(
+                    "🟢 Low Risk",
+                    f"{low_risk}",
+                    f"{low_risk/len(probabilities)*100:.1f}%",
+                    help="Patients with <30% readmission probability"
+                )
             
             with col4:
-                max_risk = probabilities.max()
-                st.metric("Highest Risk", f"{max_risk:.1%}")
+                st.metric(
+                    "📊 Average Risk",
+                    f"{avg_risk:.1%}",
+                    help="Mean readmission probability across all patients"
+                )
             
-            # Risk distribution chart
-            st.subheader("Risk Distribution")
-            fig, ax = plt.subplots(figsize=(10, 6))
+            # ─── INTERACTIVE CHARTS ──────────────────────────────────────
+            st.markdown("### 📊 Interactive Visualizations")
             
-            # Create histogram
-            ax.hist(probabilities, bins=20, alpha=0.7, color='steelblue', edgecolor='black')
-            ax.axvline(x=0.3, color='orange', linestyle='--', label='30% Risk Threshold')
-            ax.axvline(x=0.5, color='red', linestyle='--', label='50% Risk Threshold')
+            tab1, tab2, tab3 = st.tabs(["📈 Distribution", "🎯 Risk Categories", "🔍 Details"])
             
-            ax.set_xlabel("Readmission Probability")
-            ax.set_ylabel("Number of Patients")
-            ax.set_title("Distribution of Predicted Readmission Probabilities")
-            ax.legend()
-            ax.grid(True, alpha=0.3)
+            with tab1:
+                # Histogram with Plotly
+                fig_hist = go.Figure()
+                
+                fig_hist.add_trace(go.Histogram(
+                    x=probabilities,
+                    nbinsx=30,
+                    marker=dict(
+                        color=probabilities,
+                        colorscale='RdYlGn_r',
+                        line=dict(color='white', width=1)
+                    ),
+                    hovertemplate='Probability: %{x:.2%}<br>Count: %{y}<extra></extra>',
+                    name='Distribution'
+                ))
+                
+                # Add threshold lines
+                fig_hist.add_vline(
+                    x=0.3,
+                    line_dash="dash",
+                    line_color="orange",
+                    annotation_text="30% Threshold",
+                    annotation_position="top"
+                )
+                
+                fig_hist.add_vline(
+                    x=risk_threshold/100,
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text=f"{risk_threshold}% High Risk",
+                    annotation_position="top"
+                )
+                
+                fig_hist.update_layout(
+                    title="Distribution of Readmission Probabilities",
+                    xaxis_title="Readmission Probability",
+                    yaxis_title="Number of Patients",
+                    template="plotly_white",
+                    height=500,
+                    hovermode='x unified'
+                )
+                
+                st.plotly_chart(fig_hist, use_container_width=True)
             
-            st.pyplot(fig)
+            with tab2:
+                # Pie chart for risk categories
+                risk_categories = pd.DataFrame({
+                    'Category': ['Low Risk', 'Medium Risk', 'High Risk'],
+                    'Count': [low_risk, medium_risk, high_risk],
+                    'Color': ['#10b981', '#f59e0b', '#ef4444']
+                })
+                
+                fig_pie = go.Figure(data=[go.Pie(
+                    labels=risk_categories['Category'],
+                    values=risk_categories['Count'],
+                    marker=dict(colors=risk_categories['Color']),
+                    hole=0.4,
+                    textinfo='label+percent',
+                    textposition='outside',
+                    hovertemplate='%{label}<br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+                )])
+                
+                fig_pie.update_layout(
+                    title="Risk Category Distribution",
+                    template="plotly_white",
+                    height=500,
+                    showlegend=True
+                )
+                
+                st.plotly_chart(fig_pie, use_container_width=True)
             
-            # Download results
-            st.subheader("Download Predictions")
-            csv = results_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download predictions as CSV",
-                data=csv,
-                file_name="readmission_predictions.csv",
-                mime="text/csv",
-                help="Click to download the predictions"
+            with tab3:
+                # Box plot
+                results_copy = results_df.copy()
+                results_copy['Risk Category'] = pd.cut(
+                    results_copy['readmission_probability'],
+                    bins=[-0.01, 0.3, risk_threshold/100, 1.01],
+                    labels=['Low', 'Medium', 'High']
+                )
+                
+                fig_box = px.box(
+                    results_copy,
+                    x='Risk Category',
+                    y='readmission_probability',
+                    color='Risk Category',
+                    color_discrete_map={'Low': '#10b981', 'Medium': '#f59e0b', 'High': '#ef4444'},
+                    title="Risk Probability by Category"
+                )
+                
+                fig_box.update_layout(
+                    yaxis_title="Readmission Probability",
+                    template="plotly_white",
+                    height=500,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig_box, use_container_width=True)
+            
+            # ─── RESULTS TABLE ───────────────────────────────────────────
+            st.markdown("### 📋 Detailed Prediction Results")
+            
+            # Add risk category to display
+            display_results = results_df.copy()
+            display_results['risk_category'] = pd.cut(
+                display_results['readmission_probability'],
+                bins=[-0.01, 0.3, risk_threshold/100, 1.01],
+                labels=['🟢 Low', '🟡 Medium', '🔴 High']
             )
+            display_results['readmission_probability'] = display_results['readmission_probability'].apply(lambda x: f"{x:.2%}")
+            
+            st.dataframe(
+                display_results,
+                use_container_width=True,
+                height=400
+            )
+            
+            # ─── DOWNLOAD SECTION ────────────────────────────────────────
+            st.markdown("### 💾 Export Results")
+            
+            col_a, col_b = st.columns(2)
+            
+            with col_a:
+                csv = results_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Full Results (CSV)",
+                    data=csv,
+                    file_name="readmission_predictions.csv",
+                    mime="text/csv",
+                    help="Download complete predictions with all columns"
+                )
+            
+            with col_b:
+                high_risk_df = results_df[results_df['readmission_probability'] >= (risk_threshold/100)]
+                high_risk_csv = high_risk_df.to_csv(index=False)
+                st.download_button(
+                    label="⚠️ Download High Risk Only (CSV)",
+                    data=high_risk_csv,
+                    file_name="high_risk_patients.csv",
+                    mime="text/csv",
+                    help="Download only high-risk patient predictions"
+                )
 
         except Exception as e:
-            st.error(f"Error processing file: {str(e)}")
-            # Show more detailed error for debugging
-            with st.expander("Show error details"):
+            st.error(f"❌ Error processing file: {str(e)}")
+            with st.expander("🔍 Show error details"):
                 import traceback
                 st.code(traceback.format_exc())
 
 else:
-    # Show data format instructions when no file is uploaded
-    with st.expander("📋 Data Format Instructions", expanded=True):
-        st.write("""
-        ### Option 1: Upload Raw Procedure Data (Recommended)
-        
-        Upload the **raw procedure-level data** with these columns:
-        - `visit_id`: Unique identifier for the hospital visit
-        - `patient_id`: Unique identifier for the patient
-        - `procedure_datetime`: Date and time of the procedure (format: YYYY-MM-DD HH:MM)
-        - `procedure_code`: Code for the procedure (any format)
-        - `age`: Patient's age (numeric)
-        - `sex`: Patient's gender (M/F)
-        - `known_chronic_condition`: 1 if patient has chronic condition, 0 otherwise
-        
-        **Example:**
-        """)
-        
-        sample_data = pd.DataFrame({
-            'visit_id': ['V1001', 'V1001', 'V1002'],
-            'patient_id': ['P001', 'P001', 'P002'],
-            'procedure_datetime': ['2023-01-15 09:30', '2023-01-15 11:00', '2023-01-16 10:00'],
-            'procedure_code': ['CPT-001', 'CPT-002', 'CPT-001'],
-            'age': [65, 65, 72],
-            'sex': ['M', 'M', 'F'],
-            'known_chronic_condition': [1, 1, 0]
-        })
-        st.dataframe(sample_data)
-        
-        st.write("""
-        ### Option 2: Upload Already-Processed Features
-        
-        If you have already calculated the engineered features, upload a CSV with these columns:
-        - `age`: Patient's age
-        - `sex_num`: Sex encoded as numeric (0=M, 1=F)
-        - `chronic_condition_num`: 1 if chronic condition, 0 otherwise
-        - `num_procedures`: Number of procedures during the visit
-        - `los_days`: Length of stay in days
-        - `num_prior_visits`: Number of previous visits for this patient
-        - `prev_los`: Length of stay of previous visit (0 if first visit)
-        - `prev_readmitted`: Whether patient was readmitted previously (0/1)
-        """)
-        
-        # Download sample template
-        st.write("**Download a sample template:**")
-        csv_sample = sample_data.to_csv(index=False)
-        st.download_button(
-            "Download Sample Template",
-            data=csv_sample,
-            file_name="sample_readmission_data.csv",
-            mime="text/csv"
-        )
+    # Instructions when no file is uploaded
+    st.markdown("### 📋 Getting Started")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        <div style='background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+            <h4 style='color: #1e40af; margin-top: 0;'>📁 Option 1: Raw Procedure Data</h4>
+            <p style='color: #64748b;'>Upload procedure-level data with these columns:</p>
+            <ul style='color: #475569;'>
+                <li><code>visit_id</code> - Visit identifier</li>
+                <li><code>patient_id</code> - Patient identifier</li>
+                <li><code>procedure_datetime</code> - Date/time</li>
+                <li><code>procedure_code</code> - Procedure code</li>
+                <li><code>age</code> - Patient age</li>
+                <li><code>sex</code> - Gender (M/F)</li>
+                <li><code>known_chronic_condition</code> - 0 or 1</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div style='background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+            <h4 style='color: #1e40af; margin-top: 0;'>⚙️ Option 2: Processed Features</h4>
+            <p style='color: #64748b;'>Upload pre-processed data with engineered features:</p>
+            <ul style='color: #475569;'>
+                <li><code>age, sex_num, chronic_condition_num</code></li>
+                <li><code>num_procedures, los_days</code></li>
+                <li><code>num_prior_visits, prev_los</code></li>
+                <li><code>prev_readmitted</code></li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Sample data preview
+    st.markdown("### 📝 Sample Data Template")
+    
+    sample_data = pd.DataFrame({
+        'visit_id': ['V1001', 'V1001', 'V1002'],
+        'patient_id': ['P001', 'P001', 'P002'],
+        'procedure_datetime': ['2023-01-15 09:30', '2023-01-15 11:00', '2023-01-16 10:00'],
+        'procedure_code': ['CPT-001', 'CPT-002', 'CPT-001'],
+        'age': [65, 65, 72],
+        'sex': ['M', 'M', 'F'],
+        'known_chronic_condition': [1, 1, 0]
+    })
+    
+    st.dataframe(sample_data, use_container_width=True)
+    
+    csv_sample = sample_data.to_csv(index=False)
+    st.download_button(
+        "📥 Download Sample Template",
+        data=csv_sample,
+        file_name="sample_readmission_data.csv",
+        mime="text/csv"
+    )
 
+# Footer
 st.markdown("---")
-st.caption("Model: Balanced Random Forest | Trained on synthetic data | For demonstration only")
+st.markdown("""
+<div style='text-align: center; color: #64748b; padding: 20px;'>
+    <p><strong>🏥 Hospital Readmission Risk Predictor</strong></p>
+    <p>Powered by Balanced Random Forest ML Model | For demonstration purposes only</p>
+    <p style='font-size: 12px;'>⚠️ Not for clinical decision-making without validation</p>
+</div>
+""", unsafe_allow_html=True)
