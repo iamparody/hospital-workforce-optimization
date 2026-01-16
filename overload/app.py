@@ -15,7 +15,7 @@ st.write("PKL exists:", os.path.exists('balanced_random_forest_readmission.pkl')
 
 
 # ─── CONFIGURATION ───────────────────────────────────────────────────────
-MODEL_PATH = "balanced_random_forest_readmission.pkl"
+MODEL_PATH = "overload/balanced_random_forest_readmission.pkl"
 FEATURES = [
     'age', 'sex_num', 'chronic_condition_num', 'num_procedures',
     'los_days', 'num_prior_visits', 'prev_los', 'prev_readmitted'
