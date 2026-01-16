@@ -8,6 +8,12 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier  # just for type hint
 from imblearn.ensemble import BalancedRandomForestClassifier
 
+import os
+st.write("Files in directory:", os.listdir('.'))
+st.write("PKL exists:", os.path.exists('balanced_random_forest_readmission.pkl'))
+
+
+
 # ─── CONFIGURATION ───────────────────────────────────────────────────────
 MODEL_PATH = "balanced_random_forest_readmission.pkl"
 FEATURES = [
