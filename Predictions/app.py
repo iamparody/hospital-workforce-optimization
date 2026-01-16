@@ -17,7 +17,7 @@ st.set_page_config(page_title="Healthcare Staffing Analytics", layout="wide")
 @st.cache_resource
 def load_models():
     try:
-        with open('healthcare_models.pkl', 'rb') as f:
+        with open('Predictions/healthcare_models.pkl', 'rb') as f:
             return pickle.load(f)
     except FileNotFoundError:
         st.error("⚠️ Model file not found. Run training_script.py first.")
@@ -321,4 +321,5 @@ else:
         **Option 2: Pre-aggregated data**
         - `date`, `facility_id`, `department_id`
         - `occupancy_rate`, `staff_per_occupied_bed`, `total_staff`
+
         """)
