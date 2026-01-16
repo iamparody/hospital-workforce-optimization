@@ -116,7 +116,7 @@ st.markdown("""
 def load_staffing_models():
     """Load workforce optimization models"""
     try:
-        with open('healthcare_models.pkl', 'rb') as f:
+        with open('Predictions/healthcare_models.pkl', 'rb') as f:
             return pickle.load(f)
     except FileNotFoundError:
         return None
@@ -125,7 +125,7 @@ def load_staffing_models():
 def load_readmission_model():
     """Load readmission prediction model"""
     try:
-        with open('balanced_random_forest_readmission.pkl', 'rb') as f:
+        with open('Predictions/balanced_random_forest_readmission.pkl', 'rb') as f:
             return pickle.load(f)
     except FileNotFoundError:
         return None
@@ -810,3 +810,4 @@ st.markdown("""
     <p style='font-size: 12px;'>⚠️ Not for clinical decision-making without validation</p>
 </div>
 """, unsafe_allow_html=True)
+
