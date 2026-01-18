@@ -7,7 +7,7 @@ import numpy as np
 
 # Page config
 st.set_page_config(
-    page_title="Readmission Analytics",
+    page_title="KIS/Readmission Analytics",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -568,4 +568,5 @@ st.markdown("""
 <div style='text-align: center; color: #6b7280; font-size: 12px;'>
     Hospital Readmission Analytics Dashboard | Data updated: {} | Built with Streamlit
 </div>
+
 """.format(pd.Timestamp.now().strftime('%Y-%m-%d')), unsafe_allow_html=True)
